@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>近超声多普勒手势识别</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0e17'/%3E%3Cpath d='M11 33c7-13 14-13 21 0s14 13 21 0' fill='none' stroke='%234fc3f7' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%237c4dff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0a0e17;
+    --bg-card: #131a28;
+    --bg-card2: #1a2336;
+    --border: #2a3550;
+    --text: #e8edf5;
+    --text-dim: #7a8aa8;
+    --accent: #4fc3f7;
+    --accent2: #7c4dff;
+    --green: #66bb6a;
+    --red: #ef5350;
+    --yellow: #ffa726;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body {
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .container {
+    width: 100%;
+    max-width: 480px;
+    padding: 20px 0 40px;
+  }
+  header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  header p {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  /* Direction Display */
+  .direction-card {
+    text-align: center;
+    padding: 28px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .direction-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 50%, rgba(79,195,247,0.08), transparent 70%);
+    pointer-events: none;
+  }
+  .dir-arrow {
+    font-size: 64px;
+    line-height: 1;
+    margin-bottom: 8px;
+    transition: transform 0.15s ease, color 0.2s ease;
+    display: inline-block;
+    color: var(--text-dim);
+  }
+  .dir-arrow.approaching { color: var(--green); transform: scale(1.15); }
+  .dir-arrow.receding { color: var(--red); transform: scale(1.15); }
+  .dir-label {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    letter-spacing: 1px;
+  }
+  .dir-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .doppler-value {
+    font-size: 36px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    margin-top: 10px;
+    letter-spacing: -0.5px;
+  }
+  .doppler-value .unit {
+    font-size: 16px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .doppler-value.positive { color: var(--green); }
+  .doppler-value.negative { color: var(--red); }
+  /* Spectrum */
+  .spectrum-card { padding: 12px; }
+  .spectrum-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 0 4px;
+  }
+  .spectrum-title span {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .spectrum-title .badge {
+    background: var(--bg-card2);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--accent);
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    border-radius: 8px;
+    background: #060a12;
+  }
+  #spectrumCanvas { height: 140px; }
+  #historyCanvas { height: 80px; margin-top: 8px; }
+  /* Controls */
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .control-group {
+    background: var(--bg-card2);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .control-group label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .control-group .val {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .control-group input[type="range"] {
+    width: 100%;
+    margin-top: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  .control-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg-card);
+  }
+  /* Button */
+  .btn {
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.5px;
+    margin-bottom: 14px;
+  }
+  .btn-start {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+    box-shadow: 0 4px 20px rgba(79,195,247,0.3);
+  }
+  .btn-start:active { transform: scale(0.98); }
+  .btn-stop {
+    background: var(--bg-card2);
+    color: var(--red);
+    border: 1px solid var(--red);
+  }
+  /* Status */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .status-dot.active { background: var(--green); animation: pulse 1.5s infinite; }
+  .status-dot.calibrating { background: var(--yellow); animation: pulse 0.8s infinite; }
+  .status-dot.error { background: var(--red); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  /* Info grid */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .info-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 8px;
+    text-align: center;
+  }
+  .info-item .label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .info-item .value {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Hint */
+  .hint {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    padding: 0 20px;
+  }
+  .hint strong { color: var(--accent); }
+  /* Error overlay */
+  .error-msg {
+    background: rgba(239,83,80,0.1);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 14px;
+    display: none;
+    line-height: 1.5;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>近超声多普勒手势识别</h1>
+    <p>Near-ultrasonic Doppler Gesture Recognition</p>
+  </header>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">未启动 · 点击下方按钮开始</span>
+  </div>
+
+  <div class="error-msg" id="errorMsg"></div>
+
+  <!-- Direction Display -->
+  <div class="card direction-card">
+    <div class="dir-arrow" id="dirArrow">↔</div>
+    <div class="dir-label" id="dirLabel">等待启动</div>
+    <div class="dir-sub" id="dirSub">请先启动超声波发射与采集</div>
+    <div class="doppler-value" id="dopplerValue">0.0<span class="unit"> Hz</span></div>
+  </div>
+
+  <!-- Spectrum Visualization -->
+  <div class="card spectrum-card">
+    <div class="spectrum-title">
+      <span>频谱分析 (FFT)</span>
+      <span class="badge" id="fftBadge">—</span>
+    </div>
+    <canvas id="spectrumCanvas"></canvas>
+    <div class="spectrum-title" style="margin-top:10px;">
+      <span>多普勒偏移历史</span>
+      <span class="badge">实时</span>
+    </div>
+    <canvas id="historyCanvas"></canvas>
+  </div>
+
+  <!-- Info -->
+  <div class="info-grid">
+    <div class="info-item">
+      <div class="label">发射频率</div>
+      <div class="value" id="infoFreq">19500 Hz</div>
+    </div>
+    <div class="info-item">
+      <div class="label">采样率</div>
+      <div class="value" id="infoSR">—</div>
+    </div>
+    <div class="info-item">
+      <div class="label">信号强度</div>
+      <div class="value" id="infoSignal">—</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" style="margin-bottom:14px;">
+    <div class="control-group">
+      <label>发射频率 <span class="val" id="freqVal">19.5 kHz</span></label>
+      <input type="range" id="freqSlider" min="18000" max="20500" step="500" value="19500">
+    </div>
+    <div class="control-group">
+      <label>发射音量 <span class="val" id="volVal">5%</span></label>
+      <input type="range" id="volSlider" min="1" max="20" step="1" value="5">
+    </div>
+    <div class="control-group">
+      <label>灵敏度 <span class="val" id="sensVal">中</span></label>
+      <input type="range" id="sensSlider" min="1" max="3" step="1" value="2">
+    </div>
+    <div class="control-group">
+      <label>FFT 点数 <span class="val" id="fftVal">4096</span></label>
+      <input type="range" id="fftSlider" min="0" max="3" step="1" value="1">
+    </div>
+  </div>
+
+  <!-- Button -->
+  <button class="btn btn-start" id="toggleBtn">启动识别</button>
+
+  <div class="hint">
+    <strong>使用方法：</strong>启动后将手在设备前方（距麦克风 5–30cm）快速挥动<br>
+    手<strong style="color:var(--green)">靠近</strong> → 频率升高（正偏移）<br>
+    手<strong style="color:var(--red)">远离</strong> → 频率降低（负偏移）<br>
+    建议在安静环境下使用，需授权麦克风权限<br>
+    <strong style="color:var(--yellow)">安全提示：</strong>部分人可听见该高频声；若听到尖锐声或感到不适请立即停止，请勿佩戴耳机使用
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============ State ============
+  let audioCtx = null;
+  let oscillator = null;
+  let gainNode = null;
+  let analyser = null;
+  let micSource = null;
+  let micStream = null;
+  let freqData = null;
+  let isRunning = false;
+  let animId = null;
+
+  let f0 = 19500;
+  let volume = 0.05;
+  let fftSize = 4096;
+  let sensitivity = 2; // 1=low, 2=mid, 3=high
+
+  // Detection state
+  let baselineAbove = 0;
+  let baselineBelow = 0;
+  let calibrationFrames = 0;
+  const CALIBRATION_TARGET = 40;
+  let smoothedDoppler = 0;
+  let direction = 'idle';
+  let directionHold = 0;
+
+  // History buffer for doppler shift
+  const HISTORY_LEN = 200;
+  const FFT_OPTIONS = [2048, 4096, 8192, 16384];
+  const AUTO_STOP_MS = 5 * 60 * 1000;
+  let autoStopTimer = null;
+  let dopplerHistory = new Float32Array(HISTORY_LEN);
+  let historyIdx = 0;
+
+  // ============ DOM ============
+  const $ = id => document.getElementById(id);
+  const toggleBtn = $('toggleBtn');
+  const statusDot = $('statusDot');
+  const statusText = $('statusText');
+  const errorMsg = $('errorMsg');
+  const dirArrow = $('dirArrow');
+  const dirLabel = $('dirLabel');
+  const dirSub = $('dirSub');
+  const dopplerValue = $('dopplerValue');
+  const spectrumCanvas = $('spectrumCanvas');
+  const historyCanvas = $('historyCanvas');
+  const fftBadge = $('fftBadge');
+  const infoFreq = $('infoFreq');
+  const infoSR = $('infoSR');
+  const infoSignal = $('infoSignal');
+  const freqSlider = $('freqSlider');
+  const volSlider = $('volSlider');
+  const sensSlider = $('sensSlider');
+  const fftSlider = $('fftSlider');
+  const freqVal = $('freqVal');
+  const volVal = $('volVal');
+  const sensVal = $('sensVal');
+  const fftVal = $('fftVal');
+
+  const specCtx = spectrumCanvas.getContext('2d');
+  const histCtx = historyCanvas.getContext('2d');
+
+  // ============ Canvas Setup ============
+  function setupCanvas(canvas, ctx) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+  }
+  function resizeCanvases() {
+    setupCanvas(spectrumCanvas, specCtx);
+    setupCanvas(historyCanvas, histCtx);
+  }
+  window.addEventListener('resize', resizeCanvases);
+  resizeCanvases();
+
+  // ============ UI Controls ============
+  freqSlider.addEventListener('input', () => {
+    f0 = parseInt(freqSlider.value);
+    freqVal.textContent = (f0 / 1000).toFixed(1) + ' kHz';
+    infoFreq.textContent = f0 + ' Hz';
+    if (oscillator && isRunning) {
+      oscillator.frequency.setTargetAtTime(f0, audioCtx.currentTime, 0.01);
+    }
+    // reset calibration
+    calibrationFrames = 0;
+    baselineAbove = 0;
+    baselineBelow = 0;
+  });
+  volSlider.addEventListener('input', () => {
+    volume = parseInt(volSlider.value) / 100;
+    volVal.textContent = volSlider.value + '%';
+    if (gainNode && isRunning) {
+      gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.01);
+    }
+  });
+  sensSlider.addEventListener('input', () => {
+    sensitivity = parseInt(sensSlider.value);
+    sensVal.textContent = ['低','中','高'][sensitivity - 1];
+  });
+  fftSlider.addEventListener('input', () => {
+    fftSize = FFT_OPTIONS[parseInt(fftSlider.value, 10)];
+    fftVal.textContent = fftSize;
+    if (analyser && isRunning) {
+      analyser.fftSize = fftSize;
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+    }
+    calibrationFrames = 0;
+  });
+
+  // ============ Status Helpers ============
+  function setStatus(text, type) {
+    statusText.textContent = text;
+    statusDot.className = 'status-dot' + (type ? ' ' + type : '');
+  }
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.add('show');
+  }
+  function hideError() {
+    errorMsg.classList.remove('show');
+  }
+
+  // ============ Start / Stop ============
+  toggleBtn.addEventListener('click', () => {
+    if (isRunning) stop();
+    else start();
+  });
+
+  async function start() {
+    hideError();
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('当前环境不支持安全的麦克风访问，请使用 HTTPS 页面和最新版浏览器。');
+      }
+      setStatus('正在初始化音频上下文...', 'calibrating');
+
+      // Create audio context with preferred sample rate
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC({ sampleRate: 48000 });
+      await audioCtx.resume();
+      const nyquist = audioCtx.sampleRate / 2;
+      const safeMaxCarrier = Math.floor((nyquist - 600) / 500) * 500;
+      if (safeMaxCarrier < 18000) {
+        throw new Error('当前设备采样率过低，无法可靠进行近超声检测。');
+      }
+      if (f0 > safeMaxCarrier) {
+        f0 = safeMaxCarrier;
+        freqSlider.value = String(f0);
+        freqVal.textContent = (f0 / 1000).toFixed(1) + ' kHz';
+        infoFreq.textContent = f0 + ' Hz';
+      }
+
+      // Create ultrasonic oscillator
+      oscillator = audioCtx.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = f0;
+      gainNode = audioCtx.createGain();
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(volume, audioCtx.currentTime + 0.8);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.start();
+
+      // Get microphone
+      setStatus('请求麦克风权限...', 'calibrating');
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 48000
+        }
+      });
+
+      micSource = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = fftSize;
+      analyser.smoothingTimeConstant = 0.2;
+      micSource.connect(analyser);
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+
+      // Reset detection state
+      calibrationFrames = 0;
+      baselineAbove = 0;
+      baselineBelow = 0;
+      smoothedDoppler = 0;
+      direction = 'idle';
+      directionHold = 0;
+      dopplerHistory.fill(0);
+      historyIdx = 0;
+
+      isRunning = true;
+      toggleBtn.textContent = '停止识别';
+      toggleBtn.className = 'btn btn-stop';
+
+      infoSR.textContent = audioCtx.sampleRate + ' Hz';
+      fftBadge.textContent = fftSize + ' pts';
+
+      setStatus('正在校准环境基线（请保持静止）...', 'calibrating');
+      dirLabel.textContent = '校准中';
+      dirSub.textContent = '请保持手静止，约 1 秒';
+      dirArrow.textContent = '…';
+      dirArrow.className = 'dir-arrow';
+
+      clearTimeout(autoStopTimer);
+      autoStopTimer = setTimeout(() => {
+        if (isRunning) {
+          stop();
+          setStatus('已自动停止 · 连续运行达到 5 分钟', '');
+        }
+      }, AUTO_STOP_MS);
+      processLoop();
+    } catch (err) {
+      console.error(err);
+      let msg = '启动失败：' + err.message;
+      if (err.name === 'NotAllowedError') {
+        msg = '麦克风权限被拒绝，请在浏览器设置中允许麦克风访问后重试。';
+      } else if (err.name === 'NotFoundError') {
+        msg = '未检测到麦克风设备。';
+      } else if (err.name === 'NotReadableError') {
+        msg = '麦克风被其他应用占用，请关闭后重试。';
+      }
+      showError(msg);
+      setStatus('启动失败', 'error');
+      cleanup();
+    }
+  }
+
+  function stop() {
+    isRunning = false;
+    if (animId) cancelAnimationFrame(animId);
+    cleanup();
+    toggleBtn.textContent = '启动识别';
+    toggleBtn.className = 'btn btn-start';
+    setStatus('已停止', '');
+    dirArrow.textContent = '↔';
+    dirArrow.className = 'dir-arrow';
+    dirLabel.textContent = '已停止';
+    dirSub.textContent = '点击启动按钮重新开始';
+    dopplerValue.innerHTML = '0.0<span class="unit"> Hz</span>';
+    dopplerValue.className = 'doppler-value';
+    infoSignal.textContent = '—';
+  }
+
+  function cleanup() {
+    clearTimeout(autoStopTimer);
+    autoStopTimer = null;
+    try { if (oscillator) { oscillator.stop(); oscillator.disconnect(); } } catch(e) {}
+    try { if (gainNode) gainNode.disconnect(); } catch(e) {}
+    try { if (micSource) micSource.disconnect(); } catch(e) {}
+    try { if (analyser) analyser.disconnect(); } catch(e) {}
+    try { if (micStream) micStream.getTracks().forEach(t => t.stop()); } catch(e) {}
+    try { if (audioCtx) audioCtx.close(); } catch(e) {}
+    oscillator = null;
+    gainNode = null;
+    micSource = null;
+    analyser = null;
+    micStream = null;
+    audioCtx = null;
+    freqData = null;
+  }
+
+  // ============ Core Detection ============
+  function processLoop() {
+    if (!isRunning) return;
+    animId = requestAnimationFrame(processLoop);
+
+    analyser.getByteFrequencyData(freqData);
+
+    const sr = audioCtx.sampleRate;
+    const binWidth = sr / analyser.fftSize;
+    const f0Bin = Math.round(f0 / binWidth);
+    const numBins = freqData.length;
+
+    // Define analysis window: look at sidebands around f0
+    // Exclude main peak (innerBins), analyze outer sidebands
+    const innerBins = 4;
+    const outerBins = sensitivity === 1 ? 20 : sensitivity === 2 ? 30 : 45;
+
+    let energyAbove = 0;
+    let energyBelow = 0;
+    let peakEnergy = 0;
+    let peakBin = f0Bin;
+
+    // Main peak energy (for signal quality)
+    for (let i = Math.max(0, f0Bin - 2); i <= Math.min(numBins - 1, f0Bin + 2); i++) {
+      if (freqData[i] > peakEnergy) {
+        peakEnergy = freqData[i];
+        peakBin = i;
+      }
+    }
+
+    // Sideband energy: above f0 (approaching)
+    const aboveStart = f0Bin + innerBins;
+    const aboveEnd = Math.min(numBins - 1, f0Bin + outerBins);
+    for (let i = aboveStart; i <= aboveEnd; i++) {
+      energyAbove += freqData[i];
+    }
+
+    // Sideband energy: below f0 (receding)
+    const belowStart = Math.max(0, f0Bin - outerBins);
+    const belowEnd = f0Bin - innerBins;
+    for (let i = belowStart; i <= belowEnd; i++) {
+      energyBelow += freqData[i];
+    }
+
+    // Signal quality
+    const signalLevel = peakEnergy;
+    infoSignal.textContent = signalLevel > 0 ? Math.round(signalLevel / 2.55) + '%' : '—';
+
+    // Calibration phase: accumulate baseline
+    if (calibrationFrames < CALIBRATION_TARGET) {
+      baselineAbove += energyAbove;
+      baselineBelow += energyBelow;
+      calibrationFrames++;
+
+      const progress = Math.round(calibrationFrames / CALIBRATION_TARGET * 100);
+      dirSub.textContent = `校准中 ${progress}% · 请保持静止`;
+
+      if (calibrationFrames === CALIBRATION_TARGET) {
+        baselineAbove /= CALIBRATION_TARGET;
+        baselineBelow /= CALIBRATION_TARGET;
+        setStatus('运行中 · 挥动你的手', 'active');
+        dirLabel.textContent = '等待手势';
+        dirSub.textContent = '将手在手机前方快速挥动';
+        dirArrow.textContent = '↔';
+      }
+      drawSpectrum(f0Bin, binWidth, peakBin);
+      drawHistory();
+      return;
+    }
+
+    // Subtract baseline
+    const aboveNorm = Math.max(0, energyAbove - baselineAbove * 1.1);
+    const belowNorm = Math.max(0, energyBelow - baselineBelow * 1.1);
+
+    // Doppler shift estimate via centroid of sideband energy difference
+    // Weighted: positive shift = above energy, negative = below energy
+    const totalSide = aboveNorm + belowNorm;
+    let dopplerShift = 0;
+
+    if (totalSide > 10) {
+      // Estimate shift magnitude from centroid of active sideband
+      if (aboveNorm > belowNorm) {
+        // Approaching: find centroid in above band
+        let wSum = 0, eSum = 0;
+        for (let i = aboveStart; i <= aboveEnd; i++) {
+          const e = Math.max(0, freqData[i] - baselineAbove / (outerBins - innerBins + 1));
+          wSum += (i - f0Bin) * e;
+          eSum += e;
+        }
+        if (eSum > 0) dopplerShift = (wSum / eSum) * binWidth;
+      } else {
+        // Receding
+        let wSum = 0, eSum = 0;
+        for (let i = belowStart; i <= belowEnd; i++) {
+          const e = Math.max(0, freqData[i] - baselineBelow / (outerBins - innerBins + 1));
+          wSum += (i - f0Bin) * e;
+          eSum += e;
+        }
+        if (eSum > 0) dopplerShift = (wSum / eSum) * binWidth;
+      }
+    }
+
+    // Smooth
+    smoothedDoppler = smoothedDoppler * 0.65 + dopplerShift * 0.35;
+
+    // Direction detection with hysteresis
+    const thresholds = [8, 5, 3]; // low, mid, high sensitivity
+    const thresh = thresholds[sensitivity - 1];
+    const hysteresis = 2;
+
+    if (direction === 'idle') {
+      if (smoothedDoppler > thresh) direction = 'approaching';
+      else if (smoothedDoppler < -thresh) direction = 'receding';
+    } else if (direction === 'approaching') {
+      if (smoothedDoppler < thresh - hysteresis) direction = 'idle';
+    } else if (direction === 'receding') {
+      if (smoothedDoppler > -thresh + hysteresis) direction = 'idle';
+    }
+
+    // Update UI
+    updateDirectionUI();
+
+    // Record history
+    dopplerHistory[historyIdx] = smoothedDoppler;
+    historyIdx = (historyIdx + 1) % HISTORY_LEN;
+
+    // Draw
+    drawSpectrum(f0Bin, binWidth, peakBin);
+    drawHistory();
+  }
+
+  function updateDirectionUI() {
+    const absShift = Math.abs(smoothedDoppler);
+    dopplerValue.innerHTML = smoothedDoppler.toFixed(1) + '<span class="unit"> Hz</span>';
+    dopplerValue.className = 'doppler-value' + (smoothedDoppler > 0.5 ? ' positive' : smoothedDoppler < -0.5 ? ' negative' : '');
+
+    if (direction === 'approaching') {
+      dirArrow.textContent = '◀';
+      dirArrow.className = 'dir-arrow approaching';
+      dirLabel.textContent = '靠近';
+      dirLabel.style.color = 'var(--green)';
+      dirSub.textContent = '手正在靠近设备 · 频率升高';
+    } else if (direction === 'receding') {
+      dirArrow.textContent = '▶';
+      dirArrow.className = 'dir-arrow receding';
+      dirLabel.textContent = '远离';
+      dirLabel.style.color = 'var(--red)';
+      dirSub.textContent = '手正在远离设备 · 频率降低';
+    } else {
+      dirArrow.textContent = '↔';
+      dirArrow.className = 'dir-arrow';
+      dirLabel.textContent = '静止 / 无手势';
+      dirLabel.style.color = 'var(--text)';
+      dirSub.textContent = '挥动你的手来触发检测';
+    }
+  }
+
+  // ============ Drawing ============
+  function drawSpectrum(f0Bin, binWidth, peakBin) {
+    const w = spectrumCanvas.width / (window.devicePixelRatio || 1);
+    const h = spectrumCanvas.height / (window.devicePixelRatio || 1);
+    specCtx.clearRect(0, 0, w, h);
+
+    // Background grid
+    specCtx.strokeStyle = 'rgba(42,53,80,0.5)';
+    specCtx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = (h / 4) * i;
+      specCtx.beginPath();
+      specCtx.moveTo(0, y);
+      specCtx.lineTo(w, y);
+      specCtx.stroke();
+    }
+
+    // Display window: f0 ± displayRange Hz
+    const displayRange = 300;
+    const binsShown = Math.ceil(displayRange / binWidth);
+    const startBin = Math.max(0, f0Bin - binsShown);
+    const endBin = Math.min(freqData.length - 1, f0Bin + binsShown);
+    const totalBins = endBin - startBin;
+
+    if (totalBins <= 0) return;
+
+    const barWidth = w / totalBins;
+
+    // Draw frequency bars
+    for (let i = startBin; i <= endBin; i++) {
+      const x = (i - startBin) * barWidth;
+      const val = freqData[i] / 255;
+      const barH = val * h * 0.95;
+
+      // Color based on position relative to f0
+      if (i === f0Bin || Math.abs(i - f0Bin) <= 2) {
+        specCtx.fillStyle = 'rgba(79,195,247,0.9)'; // main peak - blue
+      } else if (i > f0Bin) {
+        specCtx.fillStyle = 'rgba(102,187,106,0.75)'; // above - green (approaching)
+      } else {
+        specCtx.fillStyle = 'rgba(239,83,80,0.75)'; // below - red (receding)
+      }
+
+      specCtx.fillRect(x, h - barH, Math.max(1, barWidth - 0.5), barH);
+    }
+
+    // f0 marker line
+    const f0x = (f0Bin - startBin) * barWidth + barWidth / 2;
+    specCtx.strokeStyle = 'rgba(79,195,247,0.8)';
+    specCtx.lineWidth = 1.5;
+    specCtx.setLineDash([4, 3]);
+    specCtx.beginPath();
+    specCtx.moveTo(f0x, 0);
+    specCtx.lineTo(f0x, h);
+    specCtx.stroke();
+    specCtx.setLineDash([]);
+
+    // f0 label
+    specCtx.fillStyle = 'rgba(79,195,247,0.9)';
+    specCtx.font = '10px monospace';
+    specCtx.textAlign = 'center';
+    specCtx.fillText('f₀=' + (f0/1000).toFixed(1) + 'k', f0x, 12);
+
+    // Frequency axis labels
+    specCtx.fillStyle = 'rgba(122,138,168,0.7)';
+    specCtx.font = '9px monospace';
+    specCtx.textAlign = 'left';
+    specCtx.fillText(((f0 - displayRange)/1000).toFixed(1) + 'k', 2, h - 3);
+    specCtx.textAlign = 'right';
+    specCtx.fillText(((f0 + displayRange)/1000).toFixed(1) + 'k', w - 2, h - 3);
+  }
+
+  function drawHistory() {
+    const w = historyCanvas.width / (window.devicePixelRatio || 1);
+    const h = historyCanvas.height / (window.devicePixelRatio || 1);
+    histCtx.clearRect(0, 0, w, h);
+
+    // Zero line
+    histCtx.strokeStyle = 'rgba(42,53,80,0.6)';
+    histCtx.lineWidth = 1;
+    histCtx.setLineDash([3, 3]);
+    histCtx.beginPath();
+    histCtx.moveTo(0, h / 2);
+    histCtx.lineTo(w, h / 2);
+    histCtx.stroke();
+    histCtx.setLineDash([]);
+
+    // Background zones
+    histCtx.fillStyle = 'rgba(102,187,106,0.05)';
+    histCtx.fillRect(0, 0, w, h / 2);
+    histCtx.fillStyle = 'rgba(239,83,80,0.05)';
+    histCtx.fillRect(0, h / 2, w, h / 2);
+
+    // Scale: ±30 Hz
+    const scale = 30;
+    const step = w / HISTORY_LEN;
+
+    histCtx.beginPath();
+    for (let i = 0; i < HISTORY_LEN; i++) {
+      const idx = (historyIdx + i) % HISTORY_LEN;
+      const val = dopplerHistory[idx];
+      const x = i * step;
+      const y = h / 2 - (val / scale) * (h / 2) * 0.9;
+      const clampedY = Math.max(2, Math.min(h - 2, y));
+
+      if (i === 0) histCtx.moveTo(x, clampedY);
+      else histCtx.lineTo(x, clampedY);
+    }
+
+    // Gradient stroke
+    const grad = histCtx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, 'rgba(124,77,255,0.3)');
+    grad.addColorStop(1, 'rgba(79,195,247,0.9)');
+    histCtx.strokeStyle = grad;
+    histCtx.lineWidth = 2;
+    histCtx.lineJoin = 'round';
+    histCtx.stroke();
+
+    // Fill under curve
+    histCtx.lineTo(w, h / 2);
+    histCtx.lineTo(0, h / 2);
+    histCtx.closePath();
+    histCtx.fillStyle = 'rgba(79,195,247,0.1)';
+    histCtx.fill();
+
+    // Labels
+    histCtx.fillStyle = 'rgba(102,187,106,0.6)';
+    histCtx.font = '9px monospace';
+    histCtx.textAlign = 'left';
+    histCtx.fillText('+' + scale + 'Hz 靠近', 4, 11);
+    histCtx.fillStyle = 'rgba(239,83,80,0.6)';
+    histCtx.textAlign = 'left';
+    histCtx.fillText('-' + scale + 'Hz 远离', 4, h - 4);
+  }
+
+})();
+</script>
+</body>
+</html>
